@@ -48,4 +48,5 @@ async def get_installation_token(installation_id: int) -> str:
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.post(url, headers=headers)
     resp.raise_for_status()
+    logger.info("Obtained installation token for installation_id=%s", installation_id)
     return resp.json()["token"]
