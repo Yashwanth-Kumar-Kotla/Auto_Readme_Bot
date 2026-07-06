@@ -1,128 +1,134 @@
 # Auto-README Bot
 
-A GitHub App + webhook server that automatically generates and commits a
-`README.md` (with a Mermaid architecture diagram) whenever you push to any
-repository it's installed on — zero per-repo setup required.
+A GitHub App + webhook server that automatically generates and commits a README.md (including a Mermaid architecture diagram) whenever you push to any repository the App is installed on — zero per-repo setup required.
 
-## How it works
+## Description
 
-```mermaid
-flowchart TD
-    A[git push to any repo] --> B[GitHub sends push webhook]
-    B --> C[POST /webhook]
-    C --> D{Verify HMAC signature}
-    D -- invalid --> Z[401]
-    D -- valid --> E{Event is push to default branch?}
-    E -- no --> Y[200 ignored]
-    E -- yes --> F[Exchange App JWT for installation token]
-    F --> G[Fetch commit; skip if authored by the bot itself]
-    G --> H[Git Trees API: recursive file listing]
-    H --> I[Filter noise: node_modules, .git, build artifacts, binaries...]
-    I --> J[Contents API: fetch key files up to token budget]
-    J --> K[OpenAI API: generate README + Mermaid diagram]
-    K --> L{Diff vs existing README}
-    L -- unchanged --> Y
-    L -- changed --> M[Contents API PUT: commit README.md]
-    M --> N[200 OK back to GitHub]
-```
+On each push to a repository's default branch the App:
+- Verifies the webhook HMAC signature.
+- Fetches the repository tree and a small selection of "key" files (no local git clone).
+- Builds a token-budgeted context and asks OpenAI to generate a README.md that reflects the repo structure.
+- Commits README.md back via the GitHub Contents API if it changed.
 
-1. You push code to any repo you own.
-2. GitHub fires a `push` webhook (the App is installed on "All repositories").
-3. The server verifies the webhook signature, fetches the repo's file tree
-   and key files via the GitHub API (no local git clone), sends that context
-   to OpenAI, and gets back a full README with a Mermaid diagram reflecting
-   the actual code structure.
-4. If the generated README differs from what's there, it's committed back
-   via the Contents API with the message `docs: auto-update README [bot]`.
-   If it's unchanged, or the triggering commit was made by the bot itself,
-   nothing happens.
+Designed to keep per-run OpenAI usage predictable (token budgets, tree caps, small system prompt).
 
-## Project structure
+## Features
 
-- `app/main.py` — FastAPI app, `/webhook` endpoint, push-event orchestration
-- `app/auth.py` — GitHub App JWT signing + installation token exchange
-- `app/security.py` — HMAC-SHA256 webhook signature verification
-- `app/github_api.py` — Git Trees / Contents API calls (fetch + commit)
-- `app/context_builder.py` — file tree filtering, key-file selection, token-budgeted trimming (tiktoken)
-- `app/readme_generator.py` — OpenAI prompt + call
-- `app/config.py` — env vars and filtering config (ignored dirs/exts, budgets)
+- FastAPI webhook endpoint (/webhook) for GitHub push events.
+- GitHub App authentication (App JWT -> installation token).
+- Tree + file fetching via Git Trees & Contents APIs (no clones).
+- Token-aware context trimming using tiktoken.
+- OpenAI-driven README generation with a Mermaid architecture diagram.
+- Safe no-op guards: skip when commit was made by the bot or README is unchanged.
 
-## Token efficiency
+## Installation
 
-Kept deliberately cheap per run:
-
-- Model defaults to `gpt-5-mini` — strong writing quality at a fraction of a
-  full-size model's cost. Swap to `gpt-5-nano` for even less, or a bigger
-  model for repos that need deeper reasoning.
-- File contents sent to the model are capped by an actual **token** budget
-  (measured with `tiktoken`, not a byte guess), so cost is predictable
-  regardless of source language or encoding.
-- The file tree in the prompt is capped separately (default 300 entries) so
-  large monorepos don't balloon the prompt.
-- Output is capped (`MAX_OUTPUT_TOKENS`) and the system prompt is kept short
-  since it's resent on every single call.
-- A no-op guard skips the commit (and none of this runs twice) whenever the
-  generated README is unchanged from what's already there.
-
-Tune all of this in `app/config.py`: `CONTEXT_BUDGET_TOKENS`,
-`MAX_OUTPUT_TOKENS`, `MAX_TREE_ENTRIES_IN_PROMPT`.
-
-## Setup
-
-### 1. Install dependencies
+1. Create a virtual environment (optional) and install deps:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Create and configure the GitHub App
+2. Copy environment template and set required vars:
 
-1. GitHub Settings → Developer settings → GitHub Apps → New GitHub App.
-2. Webhook URL: `https://<your-deployed-url>/webhook` (you can fill this in
-   after deploying, then come back and update it).
-3. Generate a webhook secret → this is `GITHUB_WEBHOOK_SECRET`.
-4. Repository permissions → **Contents: Read and write**.
-5. Subscribe to events → **Push**.
-6. Save, note the **App ID**, generate and download a **private key** (.pem).
-7. Install the app on your account, choosing **All repositories**.
+- Copy `.env.example` -> `.env`
+- Set:
+  - GITHUB_APP_ID
+  - GITHUB_APP_PRIVATE_KEY (PEM content) or GITHUB_APP_PRIVATE_KEY_PATH
+  - GITHUB_WEBHOOK_SECRET
+  - OPENAI_API_KEY
+  - (Optional) OPENAI_MODEL — defaults to `gpt-5-mini`
 
-### 3. Configure environment variables
+Env vars used are defined in app/config.py.
 
-Copy `.env.example` to `.env` and fill in:
+## Run locally
 
-- `GITHUB_APP_ID`
-- `GITHUB_APP_PRIVATE_KEY` (PEM content) or `GITHUB_APP_PRIVATE_KEY_PATH`
-- `GITHUB_WEBHOOK_SECRET`
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL` (optional, defaults to `gpt-5-mini`)
-
-### 4. Run locally
+Start the FastAPI app:
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-### 5. Deploy
+Health check: GET / returns {"status":"ok"}  
+Webhook endpoint: POST /webhook
 
-Deploy to Render or Railway, set the env vars above in the platform's
-dashboard, then update the GitHub App's Webhook URL to point at the deployed
-`/webhook` endpoint. A `render.yaml` and `Procfile` are included.
+## Deploy
 
-### 6. Keep it awake (Render free tier only)
+- A `Procfile` and `render.yaml` are included for simple deployment to platforms like Render or Railway.
+- When deployed, set the same environment variables in your platform's dashboard.
+- Configure your GitHub App's Webhook URL to point to: https://<your-deployed-url>/webhook
 
-Render's free tier spins the service down after ~15 minutes idle; the next
-request pays a cold-start penalty (30-50s), which can exceed GitHub's webhook
-delivery timeout. `.github/workflows/keep-alive.yml` pings the health
-endpoint every 10 minutes via GitHub Actions (free) to keep it warm:
+## Keep-alive (Render free tier)
 
-1. In this repo's GitHub settings → Secrets and variables → Actions → New
-   repository secret.
-2. Name: `RENDER_URL`, value: your deployed URL (e.g.
-   `https://auto-readme-bot.onrender.com`, no trailing slash).
-3. That's it — the workflow runs on its own schedule. Not needed if you're
-   on Railway or a paid Render plan.
+This repo contains `.github/workflows/keep-alive.yml` which pings a `RENDER_URL` periodically. To use it:
+1. Add a GitHub Actions repository secret named `RENDER_URL` with your deployed URL (no trailing slash).
+2. The workflow will keep your Render service warm.
+
+## Usage
+
+1. Create a GitHub App (GitHub → Developer settings → GitHub Apps):
+   - Webhook URL: https://<your-deployed-url>/webhook
+   - Webhook secret → GITHUB_WEBHOOK_SECRET
+   - Permissions: Contents: Read & write
+   - Subscribe to: Push events
+2. Install the App on your account/org, choosing "All repositories".
+3. Push to a repo's default branch. The App will process the push and may update README.md.
+
+## Project structure
+
+- app/main.py — FastAPI app, /webhook endpoint, push-event orchestration
+- app/auth.py — GitHub App JWT signing + installation token exchange
+- app/security.py — HMAC-SHA256 webhook signature verification
+- app/github_api.py — Git Trees & Contents API calls (fetch + commit)
+- app/context_builder.py — file tree filtering, key-file selection, tiktoken-based trimming
+- app/readme_generator.py — OpenAI prompt construction + API call
+- app/config.py — env vars and filtering/token-budget config
+
+## Important configuration knobs (app/config.py)
+
+- CONTEXT_BUDGET_TOKENS — token budget for file contents sent to the model
+- MAX_OUTPUT_TOKENS — cap for OpenAI output
+- MAX_TREE_ENTRIES_IN_PROMPT — file-tree lines included in prompt
+- IGNORED_DIR_NAMES / IGNORED_EXTENSIONS / IGNORED_FILENAMES — filters for what to skip
+- BOT_COMMIT_MARKER, BOT_AUTHOR_NAME_HINTS — used to detect and skip self-triggered commits
+
+## Architecture diagram
+
+```mermaid
+flowchart TD
+  A[git push to repo] --> B[GitHub sends push webhook]
+  B --> C[/webhook (app/main.py)]
+  C --> D{security.verify_signature<br/>app/security.py}
+  D -- invalid --> Z[401]
+  D -- valid --> E{event == "push" and default branch?}
+  E -- no --> Y[200 ignored]
+  E -- yes --> F[auth.get_installation_token<br/>app/auth.py]
+  F --> G[github_api.get_commit<br/>app/github_api.py]
+  G --> H{_is_bot_commit? (app/main.py)}
+  H -- bot commit --> Y
+  H -- not bot --> I[context_builder.build_repo_context<br/>app/context_builder.py]
+  I --> J[github_api.get_tree & get_file_content<br/>app/github_api.py]
+  J --> I
+  I --> K[readme_generator.generate_readme<br/>app/readme_generator.py]
+  K --> L[OpenAI API (openai client)]
+  L --> K
+  K --> M[github_api.get_existing_readme<br/>app/github_api.py]
+  M --> N{diff vs existing README}
+  N -- unchanged --> Y
+  N -- changed --> O[github_api.put_readme -> commit README.md<br/>app/github_api.py]
+  O --> P[200 processed / logs]
+  Y --> P
+  Z --> P
+```
+
+Keep README generation rules and token budgets adjustable in app/config.py.
+
+## Files of note
+
+- requirements.txt — runtime dependencies (fastapi, uvicorn, httpx, PyJWT, cryptography, openai, tiktoken, python-dotenv)
+- Procfile, render.yaml — example deploy configs
+- .github/workflows/keep-alive.yml — optional Action to keep Render free tier awake
 
 ## Testing
 
-Push a small commit to any repo where the app is installed, then check your
-deploy platform's logs and the repo for an updated `README.md`.
+Install the App on a test repository and push a small commit to its default branch. Check your deployed service logs for processing and the repository for README.md updates.
