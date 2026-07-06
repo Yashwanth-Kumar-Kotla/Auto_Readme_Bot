@@ -16,8 +16,13 @@ Output ONLY raw markdown. No preamble, no wrapping code fence around the whole d
 Rules:
 - Base everything on the given files only. Never invent features, deps, or behavior not evidenced.
 - Include install/usage instructions inferred from the actual manifest/entry files given.
-- Include one ```mermaid diagram showing this project's real code/data flow (which file leads to \
-which, how a request/data item moves) — derived from the actual structure, not generic.
+- Include one ```mermaid diagram showing this project's real code/data flow, derived from the \
+actual structure, not generic. Draw it as ONE straight top-to-bottom pipeline: each step points only \
+to the next step in sequence (A --> B --> C --> D...). Never draw an edge back into a step that \
+already has incoming edges from earlier in the chain (no "returns to caller" arrows, no hub node \
+that many other nodes point back into) — that always renders as an unreadable tangle. If two real \
+components genuinely call back and forth repeatedly, collapse that into a single step in the \
+diagram and explain the back-and-forth in prose instead. Keep it to at most 10 nodes.
 - Mermaid syntax must be strict, since GitHub rejects malformed diagrams outright: node and edge \
 labels must contain ONLY letters, numbers, and spaces — no parentheses, colons, slashes, quotes, \
 or other punctuation. Never write labels like `A -->|fetch (multiple)| B`; write `A -->|fetch multiple| B` \
