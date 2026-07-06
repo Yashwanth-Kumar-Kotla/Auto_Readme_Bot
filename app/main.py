@@ -124,16 +124,39 @@ async def process_push(
             logger.info("Skipping %s: README unchanged", repo_full_name)
             return
 
+        bot_branch = config.BOT_BRANCH_NAME
+
+        # Reset the bot branch to the trigger branch's current head rather than
+        # committing directly to it, so the user's local clone of `default_branch`
+        # never diverges just because the bot ran. `existing_sha` is the README
+        # blob sha on `default_branch`, which is now also the bot branch's sha
+        # since we just pointed it at the same commit.
+        await github_api.ensure_branch_at(client, token, repo_full_name, bot_branch, sha)
+
         await github_api.put_readme(
             client,
             token,
             repo_full_name,
-            default_branch,
+            bot_branch,
             new_readme,
             existing_sha,
             config.BOT_COMMIT_MARKER,
         )
-        logger.info("Updated README.md for %s", repo_full_name)
+
+        existing_pr = await github_api.find_open_pull_request(
+            client, token, repo_full_name, bot_branch, default_branch
+        )
+        if existing_pr is None:
+            pr = await github_api.create_pull_request(
+                client, token, repo_full_name, bot_branch, default_branch,
+                config.PR_TITLE, config.PR_BODY,
+            )
+            logger.info("Opened PR #%s for README update on %s", pr.get("number"), repo_full_name)
+        else:
+            logger.info(
+                "Updated existing PR #%s for README update on %s",
+                existing_pr.get("number"), repo_full_name,
+            )
 
 
 def _is_bot_commit(commit: dict) -> bool:

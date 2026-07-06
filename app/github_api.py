@@ -94,3 +94,67 @@ async def get_commit(
     resp = await client.get(url, headers=_headers(token))
     resp.raise_for_status()
     return resp.json()
+
+
+async def get_branch_sha(
+    client: httpx.AsyncClient, token: str, repo_full_name: str, branch: str
+) -> Optional[str]:
+    """Return the head commit SHA of a branch, or None if it doesn't exist."""
+    url = f"{GITHUB_API_BASE}/repos/{repo_full_name}/git/ref/heads/{branch}"
+    resp = await client.get(url, headers=_headers(token))
+    if resp.status_code == 404:
+        return None
+    resp.raise_for_status()
+    return resp.json()["object"]["sha"]
+
+
+async def ensure_branch_at(
+    client: httpx.AsyncClient, token: str, repo_full_name: str, branch: str, sha: str
+) -> None:
+    """Create the branch at `sha` if it doesn't exist; force-reset it to `sha` if it does
+    and has drifted. Keeps the bot branch always one commit ahead of the trigger branch."""
+    existing_sha = await get_branch_sha(client, token, repo_full_name, branch)
+    if existing_sha is None:
+        url = f"{GITHUB_API_BASE}/repos/{repo_full_name}/git/refs"
+        resp = await client.post(
+            url, headers=_headers(token),
+            json={"ref": f"refs/heads/{branch}", "sha": sha},
+        )
+        resp.raise_for_status()
+    elif existing_sha != sha:
+        url = f"{GITHUB_API_BASE}/repos/{repo_full_name}/git/refs/heads/{branch}"
+        resp = await client.patch(
+            url, headers=_headers(token), json={"sha": sha, "force": True}
+        )
+        resp.raise_for_status()
+
+
+async def find_open_pull_request(
+    client: httpx.AsyncClient, token: str, repo_full_name: str, branch: str, base: str
+) -> Optional[dict]:
+    """Return the open PR from `branch` into `base`, if one already exists."""
+    owner = repo_full_name.split("/")[0]
+    url = f"{GITHUB_API_BASE}/repos/{repo_full_name}/pulls"
+    params = {"head": f"{owner}:{branch}", "base": base, "state": "open"}
+    resp = await client.get(url, headers=_headers(token), params=params)
+    resp.raise_for_status()
+    results = resp.json()
+    return results[0] if results else None
+
+
+async def create_pull_request(
+    client: httpx.AsyncClient,
+    token: str,
+    repo_full_name: str,
+    branch: str,
+    base: str,
+    title: str,
+    body: str,
+) -> dict:
+    url = f"{GITHUB_API_BASE}/repos/{repo_full_name}/pulls"
+    resp = await client.post(
+        url, headers=_headers(token),
+        json={"title": title, "head": branch, "base": base, "body": body},
+    )
+    resp.raise_for_status()
+    return resp.json()
