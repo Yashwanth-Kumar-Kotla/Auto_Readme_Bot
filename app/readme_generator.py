@@ -18,6 +18,11 @@ Rules:
 - Include install/usage instructions inferred from the actual manifest/entry files given.
 - Include one ```mermaid diagram showing this project's real code/data flow (which file leads to \
 which, how a request/data item moves) — derived from the actual structure, not generic.
+- Mermaid syntax must be strict, since GitHub rejects malformed diagrams outright: node and edge \
+labels must contain ONLY letters, numbers, and spaces — no parentheses, colons, slashes, quotes, \
+or other punctuation. Never write labels like `A -->|fetch (multiple)| B`; write `A -->|fetch multiple| B` \
+instead. Keep node IDs short alphanumeric tokens (e.g. `M`, `GAPI`) separate from their bracketed \
+label text.
 - Sections as warranted by evidence: title, description, features, installation, usage, structure, \
 architecture diagram. Skip license/badges/contributors unless evidenced.
 - Be concise. No filler paragraphs."""
