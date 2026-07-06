@@ -19,6 +19,12 @@ BOT_AUTHOR_NAME_HINTS = ("auto-readme-bot", "github-actions[bot]")
 CONTEXT_BUDGET_TOKENS = 6_000
 MAX_OUTPUT_TOKENS = 3_000
 
+# If a push's changed files are no more than this fraction of the repo's
+# visible file count, treat it as an incremental update: send the model the
+# diff + existing README instead of the whole repo. Above this ratio (or on
+# the first-ever run, with no README yet) it's a full regeneration.
+INCREMENTAL_CHANGE_RATIO_THRESHOLD = 0.4
+
 IGNORED_DIR_NAMES = {
     "node_modules", ".git", "venv", ".venv", "env", "__pycache__",
     "dist", "build", ".next", ".nuxt", "target", "vendor",

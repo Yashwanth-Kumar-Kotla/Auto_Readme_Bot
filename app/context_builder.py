@@ -21,6 +21,16 @@ class RepoContext:
     file_tree: list[str]
     key_files: dict[str, str]
     tree_truncated: bool = False
+    mode: str = "full"  # "full" or "incremental"
+    existing_readme: str | None = None
+    added_paths: list[str] = None
+    modified_paths: list[str] = None
+    removed_paths: list[str] = None
+
+    def __post_init__(self):
+        self.added_paths = self.added_paths or []
+        self.modified_paths = self.modified_paths or []
+        self.removed_paths = self.removed_paths or []
 
 
 def _is_ignored_path(path: str) -> bool:
@@ -77,8 +87,28 @@ def _select_key_paths(paths: list[str]) -> list[str]:
     return ordered
 
 
+def _decide_mode(
+    visible_paths: list[str],
+    changed_paths: list[str],
+    existing_readme: str | None,
+) -> str:
+    if existing_readme is None or not changed_paths:
+        return "full"
+    ratio = len(changed_paths) / max(1, len(visible_paths))
+    if ratio > config.INCREMENTAL_CHANGE_RATIO_THRESHOLD:
+        return "full"
+    return "incremental"
+
+
 async def build_repo_context(
-    client: httpx.AsyncClient, token: str, repo_full_name: str, sha: str
+    client: httpx.AsyncClient,
+    token: str,
+    repo_full_name: str,
+    sha: str,
+    existing_readme: str | None = None,
+    added: list[str] | None = None,
+    modified: list[str] | None = None,
+    removed: list[str] | None = None,
 ) -> RepoContext:
     raw_tree = await github_api.get_tree(client, token, repo_full_name, sha)
 
@@ -95,7 +125,22 @@ async def build_repo_context(
         )
         visible_paths = visible_paths[: config.MAX_TREE_ENTRIES]
 
-    key_paths = _select_key_paths(visible_paths)
+    visible_set = set(visible_paths)
+    added = [p for p in (added or []) if p in visible_set]
+    modified = [p for p in (modified or []) if p in visible_set]
+    removed = [p for p in (removed or []) if not _is_ignored_path(p)]
+    changed_paths = added + modified
+
+    mode = _decide_mode(visible_paths, changed_paths, existing_readme)
+
+    if mode == "incremental":
+        key_paths = changed_paths
+        logger.info(
+            "Repo %s: incremental mode, %d changed file(s)",
+            repo_full_name, len(key_paths),
+        )
+    else:
+        key_paths = _select_key_paths(visible_paths)
 
     key_files: dict[str, str] = {}
     budget_remaining = config.CONTEXT_BUDGET_TOKENS
@@ -118,5 +163,12 @@ async def build_repo_context(
     tree_truncated = len(visible_paths) > len(tree_for_prompt)
 
     return RepoContext(
-        file_tree=tree_for_prompt, key_files=key_files, tree_truncated=tree_truncated
+        file_tree=tree_for_prompt,
+        key_files=key_files,
+        tree_truncated=tree_truncated,
+        mode=mode,
+        existing_readme=existing_readme if mode == "incremental" else None,
+        added_paths=added,
+        modified_paths=modified,
+        removed_paths=removed,
     )

@@ -45,6 +45,7 @@ async def webhook(
     installation_id = payload.get("installation", {}).get("id")
     head_commit = payload.get("head_commit") or {}
     sha = payload.get("after") or head_commit.get("id")
+    commits = payload.get("commits") or []
 
     if not all([repo_full_name, default_branch, installation_id, sha]):
         logger.info("Ignoring push: missing required fields in payload")
@@ -63,7 +64,7 @@ async def webhook(
         return {"status": "ignored", "reason": "branch deletion"}
 
     try:
-        await process_push(repo_full_name, default_branch, installation_id, sha)
+        await process_push(repo_full_name, default_branch, installation_id, sha, commits)
     except Exception:
         logger.exception("Failed processing push for %s@%s", repo_full_name, sha)
 
@@ -71,7 +72,25 @@ async def webhook(
     return {"status": "processed"}
 
 
-async def process_push(repo_full_name: str, default_branch: str, installation_id: int, sha: str):
+def _extract_changed_paths(commits: list[dict]) -> tuple[list[str], list[str], list[str]]:
+    added, modified, removed = set(), set(), set()
+    for commit in commits:
+        added.update(commit.get("added") or [])
+        modified.update(commit.get("modified") or [])
+        removed.update(commit.get("removed") or [])
+    # A path added then later removed within the same push is a net no-op; drop it from both.
+    added -= removed
+    modified -= removed
+    return sorted(added), sorted(modified), sorted(removed)
+
+
+async def process_push(
+    repo_full_name: str,
+    default_branch: str,
+    installation_id: int,
+    sha: str,
+    commits: list[dict],
+):
     logger.info("Processing push: %s@%s (branch=%s)", repo_full_name, sha, default_branch)
 
     token = await auth.get_installation_token(installation_id)
@@ -82,17 +101,24 @@ async def process_push(repo_full_name: str, default_branch: str, installation_id
             logger.info("Skipping %s@%s: triggered by our own bot commit", repo_full_name, sha)
             return
 
-        ctx = await build_repo_context(client, token, repo_full_name, sha)
+        existing_content, existing_sha = await github_api.get_existing_readme(
+            client, token, repo_full_name, default_branch
+        )
+
+        added, modified, removed = _extract_changed_paths(commits)
+
+        ctx = await build_repo_context(
+            client, token, repo_full_name, sha,
+            existing_readme=existing_content,
+            added=added, modified=modified, removed=removed,
+        )
+        logger.info("Repo %s: generating README in %s mode", repo_full_name, ctx.mode)
 
         try:
             new_readme = generate_readme(repo_full_name, ctx)
         except Exception:
-            logger.exception("Claude API call failed for %s@%s", repo_full_name, sha)
+            logger.exception("OpenAI API call failed for %s@%s", repo_full_name, sha)
             return
-
-        existing_content, existing_sha = await github_api.get_existing_readme(
-            client, token, repo_full_name, default_branch
-        )
 
         if existing_content is not None and existing_content.strip() == new_readme.strip():
             logger.info("Skipping %s: README unchanged", repo_full_name)
