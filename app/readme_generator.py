@@ -78,10 +78,7 @@ def _build_user_prompt(repo_full_name: str, ctx: RepoContext) -> str:
     return f"Repo: {repo_full_name}\n\nFile tree:\n{tree_block}\n\nKey files:\n{files_block}"
 
 
-def generate_readme(repo_full_name: str, ctx: RepoContext) -> str:
-    client = OpenAI(api_key=config.OPENAI_API_KEY)
-    user_prompt = _build_user_prompt(repo_full_name, ctx)
-
+def _call_model(client: OpenAI, user_prompt: str) -> str:
     response = client.chat.completions.create(
         model=config.OPENAI_MODEL,
         max_completion_tokens=config.MAX_OUTPUT_TOKENS,
@@ -100,5 +97,27 @@ def generate_readme(repo_full_name: str, ctx: RepoContext) -> str:
         first_newline = text.find("\n")
         if first_newline != -1:
             text = text[first_newline + 1:-3].strip()
+
+    return text
+
+
+def generate_readme(repo_full_name: str, ctx: RepoContext) -> str:
+    client = OpenAI(api_key=config.OPENAI_API_KEY)
+    user_prompt = _build_user_prompt(repo_full_name, ctx)
+
+    text = _call_model(client, user_prompt)
+    if len(text) < config.MIN_README_LENGTH:
+        # Reasoning models occasionally burn their whole token budget on
+        # hidden reasoning and return an empty/truncated visible answer.
+        # One retry is usually enough; never let a blank result through.
+        logger.warning(
+            "%s: generation returned %d chars, retrying once", repo_full_name, len(text)
+        )
+        text = _call_model(client, user_prompt)
+
+    if len(text) < config.MIN_README_LENGTH:
+        raise RuntimeError(
+            f"Model output too short after retry ({len(text)} chars) — refusing to commit it"
+        )
 
     return text

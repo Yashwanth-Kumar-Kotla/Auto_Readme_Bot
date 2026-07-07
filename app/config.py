@@ -29,7 +29,14 @@ PR_BODY = (
 # Token budget (not bytes) for file contents sent to the model, measured
 # with tiktoken so it maps directly to what we're billed for.
 CONTEXT_BUDGET_TOKENS = 6_000
-MAX_OUTPUT_TOKENS = 3_000
+# Reasoning-capable models (gpt-5-mini included) count hidden reasoning
+# tokens against this same budget. Too tight a cap can burn the whole
+# budget on reasoning and leave nothing for the visible answer, which
+# comes back as an empty string. Kept generous for that reason.
+MAX_OUTPUT_TOKENS = 8_000
+# Below this length, treat the model's output as a failed generation
+# rather than a valid (if short) README — never commit near-empty content.
+MIN_README_LENGTH = 200
 
 # If a push's changed files are no more than this fraction of the repo's
 # visible file count, treat it as an incremental update: send the model the
