@@ -28,27 +28,41 @@ don't affect byte-for-byte identical.
 - Only touch the sections whose accuracy is affected by the added/modified/removed files listed. \
 Add new sections only if the change clearly warrants one (e.g. a new major feature).
 - If a removed file was the sole evidence for a section/claim, delete that part.
-- Update the Mermaid diagram only if the changed files alter the actual flow it depicts; otherwise \
-leave it untouched.
+- Update the diagram only if the changed files alter the actual thing it depicts; otherwise leave \
+it untouched. If a diagram wasn't included before, add one now only if the rule below says this \
+project has earned one.
 
-Rules for the diagram (new README) or its updates (edit mode):
-- Include one ```mermaid diagram showing this project's real code/data flow, derived from the \
-actual structure, not generic. Draw it as ONE straight top-to-bottom pipeline: each step points only \
-to the next step in sequence (A --> B --> C --> D...). Never draw an edge back into a step that \
-already has incoming edges from earlier in the chain (no "returns to caller" arrows, no hub node \
-that many other nodes point back into) — that always renders as an unreadable tangle. If two real \
-components genuinely call back and forth repeatedly, collapse that into a single step in the \
-diagram and explain the back-and-forth in prose instead. Keep it to at most 10 nodes.
-- Mermaid syntax must be strict, since GitHub rejects malformed diagrams outright: node and edge \
-labels must contain ONLY letters, numbers, and spaces — no parentheses, colons, slashes, quotes, \
-or other punctuation. Never write labels like `A -->|fetch (multiple)| B`; write `A -->|fetch multiple| B` \
-instead. Keep node IDs short alphanumeric tokens (e.g. `M`, `GAPI`) separate from their bracketed \
-label text.
+Whether to include a diagram at all:
+- A diagram earns its place only when the project has multiple real components whose relationship \
+isn't obvious from a file listing alone: a pipeline with distinct stages, a client/server split, a \
+non-trivial data model, an event or state flow, layered services, etc.
+- Skip the diagram entirely for a single script, a small utility with one obvious entry point, a \
+pure config/data repo, or anything where the file tree already tells the whole story. A forced \
+diagram that just restates "main.py runs" adds nothing — omit it rather than pad the README.
+- When in doubt, prefer no diagram over a trivial one.
+
+If a diagram is warranted, pick the Mermaid diagram type that actually fits what you're showing, \
+don't default to flowchart out of habit:
+- `flowchart` for a pipeline or build/deploy sequence: draw it as ONE straight top-to-bottom chain, \
+each step pointing only to the next (A --> B --> C). Never route an edge back into an earlier step \
+or through a hub node many others point back into — that always renders as an unreadable tangle. If \
+two components genuinely call back and forth, collapse that into a single step and explain the \
+back-and-forth in prose instead. At most 10 nodes.
+- `sequenceDiagram` when the interesting part is the order of calls/responses between a fixed small \
+set of actors (client, server, database, external API) — this is the right tool for back-and-forth, \
+not a flowchart hack.
+- `classDiagram` for a project whose core is its object/type model (inheritance, composition).
+- `erDiagram` for a project centered on a database schema or data model.
+- `stateDiagram-v2` for a project that's fundamentally a state machine (statuses, lifecycle stages).
+- Mermaid syntax must be strict regardless of type, since GitHub rejects malformed diagrams outright: \
+labels must contain ONLY letters, numbers, and spaces — no parentheses, colons, slashes, quotes, or \
+other punctuation. Never write `A -->|fetch (multiple)| B`; write `A -->|fetch multiple| B` instead. \
+Keep node/actor IDs short alphanumeric tokens separate from their label text.
 
 General:
 - Include install/usage instructions inferred from the actual manifest/entry files given.
 - Sections as warranted by evidence: title, description, features, installation, usage, structure, \
-architecture diagram. Skip license/badges/contributors unless evidenced.
+and a diagram only if earned per the rule above. Skip license/badges/contributors unless evidenced.
 - Be concise. No filler paragraphs."""
 
 
